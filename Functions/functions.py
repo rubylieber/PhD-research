@@ -51,3 +51,27 @@ def change_dec_years(dec_data):
     last_year = dec_data_copy.time[-1].values
     dec_data_new = dec_data_copy.drop_sel(time=last_year)
     return dec_data_new
+
+def find_event_years(nino_index, threshold, duration):
+    
+    import climtas
+    
+    #find all times that the nino index exceeds the threshold for the specified duration (usually 5 or 6 months)
+    el_nino_events = climtas.event.find_events(nino_index >= threshold, min_duration=duration)
+    la_nina_events = climtas.event.find_events(nino_index <= -threshold, min_duration=duration)
+    
+    #select out the time index
+    el_nino_years_index = el_nino_events.time.values
+    la_nina_years_index = la_nina_events.time.values
+    
+    #need to include time index of events that span over a year so the next year is also included (?)
+    
+    #use time index to find event dates in datetime 
+    nino_index_el_nino_years = nino_index.isel(time=el_nino_years_index)
+    nino_index_la_nina_years = nino_index.isel(time=la_nina_years_index)
+    
+    #select out just the year 
+    el_nino_years = nino_index_el_nino_years.time.dt.year
+    la_nina_years = nino_index_la_nina_years.time.dt.year
+    
+    return el_nino_years, la_nina_years 
