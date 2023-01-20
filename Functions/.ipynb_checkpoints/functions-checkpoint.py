@@ -199,7 +199,7 @@ def detrend_by_month_ufunc(data):
 
 def regress_nino(data, nino):
     """
-    Returns the linear regression at each gridpoint of 'data' onto 'nino'
+    Returns the linear regression at each gridpoint of 'data' against 'nino'
     """
     
     import numpy as np
@@ -207,7 +207,7 @@ def regress_nino(data, nino):
     import xarray as xr
     
     # Get the nino values at the dates matching 'data'
-    nino = nino.sel(time=data.time)
+    # nino = nino.sel(time=data.time)
     
     # Function to apply on each gridpoint
     def regress_gridpoint(data):
@@ -298,14 +298,15 @@ def read_in_cmip_models(directory, ensemble, var, start_date, end_date):
     for name, path in models.items():
         try:
             d = xr.open_mfdataset(path, combine='by_coords', chunks={'time':-1, 'lat':110, 'lon':110})
-            if len(d['time'])!=1980:
-                d = d.sel(time=slice('1850-01', '2014-12'))
-            del d['time']
-            del d['time_bnds']
-            time_month = pd.date_range(start=f'{start_date}',end = f'{end_date}', freq ='M')
-            d.coords['time'] = time_month
-            ds.append(d)
-            names.append(name)
+            if len(d['time'])==1980:
+                del d['time']
+                del d['time_bnds']
+                time_month = pd.date_range(start=f'{start_date}',end = f'{end_date}', freq ='M')
+                d.coords['time'] = time_month
+                ds.append(d)
+                names.append(name)
+            else:
+                print(f'Model {name} has weird time')
         except OSError:
             # No files read, move on to the next
             continue 
@@ -327,12 +328,12 @@ def zonal_std(data):
     return zonal_mean
 
 
-def sst_comp(nino34, sst, season, threshold, duration):
+def sst_comp(nino34, sst, season):
     '''
     Takes nino34 index, sst data and returns El Nino and La Nina sst composites for specified season
     '''
     # Calculate ENSO years with nino34 index
-    el_nino_years, la_nina_years = find_event_years(nino34, threshold, duration)
+    el_nino_years, la_nina_years = find_event_years(nino34, 0.4, 6)
     # Offset years for djf and mam
     el_nino_years_offset = el_nino_years +1
     la_nina_years_offset = la_nina_years +1
@@ -358,9 +359,6 @@ def sst_comp(nino34, sst, season, threshold, duration):
 
 # make a function to return eofs, pcs and variance fraction 
 def eof_and_pcs(data, n):
-    '''
-    Returns EOFs, PCs, and variance fraction for input 3D data (e.g. SST anomalies)
-    '''
     import numpy as np
     import xarray as xr
     from eofs.xarray import Eof as Eof_xr
@@ -378,145 +376,4 @@ def eof_and_pcs(data, n):
     variance_fractions = solver.varianceFraction(neigs=n)
     return eofs, pcs_xr, variance_fractions
 
-def quad_detrend(data):
-    '''
-    Input data must be 2D
-    '''
-    from statsmodels.tsa import tsatools
-    return tsatools.detrend(data, order=2)
 
-def pattern_cor(d1, d2):
-    import numpy as np
-    from scipy.stats import pearsonr
-    # Make 1D
-    d1_1d = d1.values.flatten()
-    d2_1d = d2.values.flatten()
-    # Mask
-    mask = d1_1d*d2_1d
-    d1_1d = d1_1d[np.isfinite(mask)]
-    d2_1d = d2_1d[np.isfinite(mask)]
-    # Correlation
-    return pearsonr(d1_1d, d2_1d)[0]
-
-def read_in_etccdi(var, ensemble):
-    """
-    Reads in all files from the ETCCDI folder on NCI 
-    File path is structured as varETCCDI_mon_model_ensemble_base_version.nc 
-    Files organised by model name 
-    
-    ***Need to find a way to selct variable from ds (e.g., txxETCCDI) without having to change it manually 
-    
-    """
-    
-    import xarray as xr  
-    import os
-    import pandas as pd
-    
-
-    institution_dir = '/g/data/ia39/aus-ref-clim-data-nci/cmip6-etccdi/data/v1-0/etccdi/base_independent/mon/historical'
-
-    all_models = os.listdir(institution_dir)
-
-    var_files = []
-    model_names = []
-
-    for model in all_models:
-        all_files = os.listdir(f'{institution_dir}/{model}')
-        for file in all_files:
-            if var in file and ensemble in file:
-                var_files.append(f'{model}/{file}')
-                model_names.append(model)
-
-    paths = [f'/g/data/ia39/aus-ref-clim-data-nci/cmip6-etccdi/data/v1-0/etccdi/base_independent/mon/historical/{f}'
-                 for f in var_files]
-
-    dictionary = {model_names[i]: paths[i] for i in range(len(model_names))}
-
-    names = []
-    ds = []
-
-    for name, path in dictionary.items():
-        try:
-            d = xr.open_mfdataset(path, combine='by_coords', chunks={'time':-1, 'lat':110, 'lon':110}).txxETCCDI
-            print(f'{name}: lat {len(d.lat.values)} lon {len(d.lon.values)}')
-            if len(d['time'])!=1980:
-                d = d.sel(time=slice('1850-01', '2014-12'))
-            del d['time']
-            if hasattr(d, 'height'):
-                del d['height']
-            time_month = pd.date_range(start='1850-01',end = '2015-01', freq ='M')
-            d.coords['time'] = time_month
-            ds.append(d)
-            names.append(name)
-        except OSError:
-            # No files read, move on to the next
-            continue 
-
-    multi_model = xr.concat(ds, dim='model', coords='minimal').chunk('auto')
-    multi_model.coords['model'] = names
-    return multi_model 
-
-def format_gridlines(ax, top_labels=False, bottom_labels=False, left_labels=False, right_labels=False):
-    
-    import cartopy.crs as ccrs
-    from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
-    
-    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
-                  linewidth=1, color='gray', alpha=0.75, linestyle='--')
-    gl.top_labels = top_labels
-    gl.bottom_labels = bottom_labels
-    gl.right_labels = right_labels
-    gl.left_labels = left_labels
-    gl.xformatter = LONGITUDE_FORMATTER
-    gl.yformatter = LATITUDE_FORMATTER
-    
-    return ax
-
-def bincount_same_sign(data):
-    
-    import xarray as xr
-    import numpy as np
-    
-    data = xr.DataArray(data)
-    try:
-        count = np.bincount(data)[0] + np.bincount(data)[1]
-    except:
-        count = np.bincount(data)[0]
-    return count 
-
-def bincount_opp_sign(data):
-    
-    import xarray as xr
-    import numpy as np
-    
-    data = xr.DataArray(data)
-    try:
-        count = np.bincount(data)[2] + np.bincount(data)[3]
-    except IndexError:
-        try:
-            count = np.bincount(data)[2]
-        except IndexError:
-            count = 0
-    return count 
-
-def sign_percents(data, total_num):
-    
-    import xarray as xr
-    import numpy as np
-    
-    same_sign_bins = np.apply_along_axis(bincount_same_sign, 
-                                     data.get_axis_num('model'), 
-                                     data)
-    same_sign_percent = (same_sign_bins/total_num)*100
-    same_sign_percent = xr.DataArray(same_sign_percent, 
-                                 dims=data.mean(dim='model').dims, 
-                                 coords=data.mean(dim='model').coords)
-    
-    opp_sign_bins = np.apply_along_axis(bincount_opp_sign, 
-                                     data.get_axis_num('model'), 
-                                     data)
-    opp_sign_percent = (opp_sign_bins/total_num)*100
-    opp_sign_percent = xr.DataArray(opp_sign_percent, 
-                                dims=data.mean(dim='model').dims, 
-                                coords=data.mean(dim='model').coords)
-    return same_sign_percent, opp_sign_percent
